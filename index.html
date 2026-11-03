@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LaaS – আমার পার্সোনাল অ্যাসিস্ট্যান্ট</title>
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600&family=Fraunces:wght@600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14121f;--panel:#1d1a2e;--text:#f3ecff;--mute:#a79fc2;--line:#322d4d;--orb:#9b7bff;--orb2:#5b3fd0}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:'Hind Siliguri',system-ui,sans-serif;display:flex;flex-direction:column;max-width:640px;margin:0 auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;flex-direction:column;align-items:center;padding:20px 16px 8px}
+h1{font-family:'Fraunces',serif;font-size:34px;margin:14px 0 0;letter-spacing:.02em}
+#mood{color:var(--mute);font-size:14px;min-height:20px}
+#orb{width:112px;height:112px;border-radius:50%;background:radial-gradient(circle at 35% 30%,var(--orb),var(--orb2));box-shadow:0 0 50px var(--orb2);transition:background .8s,box-shadow .8s;animation:breathe 4s ease-in-out infinite}
+#orb.talk{animation:talk .45s ease-in-out infinite}
+@keyframes breathe{50%{transform:scale(1.06)}}
+@keyframes talk{50%{transform:scale(1.14)}}
+@media (prefers-reduced-motion:reduce){#orb,#orb.talk{animation:none}}
+#log{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:85%;padding:10px 14px;border-radius:16px;line-height:1.5;white-space:pre-wrap}
+.u{align-self:flex-end;background:var(--orb2)}
+.a{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+.a a{color:#ffd9a8}
+#bar{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+#in{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:22px;padding:12px 16px;font:inherit;min-width:0}
+button{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:22px;padding:0 16px;font:inherit;cursor:pointer;min-height:44px}
+button:focus-visible,#in:focus-visible{outline:2px solid #ffd9a8;outline-offset:2px}
+#send{background:var(--orb2);border-color:var(--orb2)}
+#mic.on{background:#c43d62;border-color:#c43d62}
+#tools{display:flex;gap:8px;padding:0 12px 8px;flex-wrap:wrap}
+#tools button{min-height:34px;font-size:13px;padding:0 12px}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:16px;width:min(92vw,420px)}
+dialog input,dialog textarea{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit;margin:6px 0 12px}
+label{font-size:14px;color:var(--mute)}
+</style>
+</head>
+<body>
+<header>
+  <div id="orb" aria-hidden="true"></div>
+  <h1>LaaS</h1>
+  <div id="mood">আমি আছি। কী করতে পারি?</div>
+</header>
+<div id="log" aria-live="polite"></div>
+<div id="tools">
+  <button id="lang">ভাষা: বাংলা</button>
+  <button id="voice">কণ্ঠ: চালু</button>
+  <button id="cfg">সেটিংস ও কন্টাক্ট</button>
+</div>
+<div id="bar">
+  <button id="mic" aria-label="কথা বলুন">🎤</button>
+  <input id="in" placeholder="লিখুন বা বলুন…" autocomplete="off">
+  <button id="send">পাঠান</button>
+</div>
+
+<dialog id="dlg">
+  <label>Anthropic API key (ঐচ্ছিক, স্মার্ট উত্তরের জন্য)</label>
+  <input id="key" type="password" placeholder="sk-ant-…">
+  <label>কন্টাক্ট (প্রতি লাইনে: নাম=নম্বর)</label>
+  <textarea id="cts" rows="5" placeholder="আম্মু=017XXXXXXXX"></textarea>
+  <button id="save">সেভ করুন</button> <button id="close">বন্ধ</button>
+</dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+const S={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}}};
+let lang=S.get('lang','bn-BD'), voiceOn=S.get('voice',true), contacts=S.get('contacts',{}), apiKey=S.get('key',''), hist=[];
+
+const MOODS={
+ calm:['#9b7bff','#5b3fd0','আমি আছি।'],
+ happy:['#ffc46b','#e8823a','আমি খুশি!'],
+ sad:['#6fa8ff','#2f5fc0','আমি তোমার পাশে আছি।'],
+ care:['#ff8fb1','#c43d62','আমি তোমার খেয়াল রাখছি।'],
+ think:['#5fe0c8','#1f8f87','ভাবছি…']
+};
+function mood(k){const m=MOODS[k]||MOODS.calm,r=document.documentElement.style;r.setProperty('--orb',m[0]);r.setProperty('--orb2',m[1]);$('mood').textContent=m[2]}
+function detect(t){t=t.toLowerCase();
+ if(/মন খারাপ|কষ্ট|দুঃখ|কান্না|একা|sad|lonely|cry/.test(t))return'sad';
+ if(/ভালো|খুশি|ধন্যবাদ|দারুণ|happy|great|thanks|haha|হা হা/.test(t))return'happy';
+ if(/ক্লান্ত|অসুস্থ|ব্যথা|tired|sick|কাজের চাপ|stress/.test(t))return'care';
+ return'calm'}
+
+function add(t,c){const d=document.createElement('div');d.className='m '+c;d.textContent=t;$('log').appendChild(d);$('log').scrollTop=1e9;return d}
+function addLink(t,href){const d=add(t+' ','a');const a=document.createElement('a');a.href=href;a.textContent='এখানে চাপুন';d.appendChild(a);return d}
+
+/* কণ্ঠ: মেয়েদের কণ্ঠ বেছে নেয় */
+function pickVoice(){const v=speechSynthesis.getVoices();const l=lang.slice(0,2);
+ const f=v.filter(x=>x.lang.toLowerCase().startsWith(l));
+ return f.find(x=>/female|girl|woman|nabanita|tanishaa|google/i.test(x.name))||f[0]||v.find(x=>/female/i.test(x.name))||null}
+function say(t){if(!voiceOn||!('speechSynthesis' in window))return;speechSynthesis.cancel();
+ const u=new SpeechSynthesisUtterance(t);u.lang=lang;const v=pickVoice();if(v)u.voice=v;u.pitch=1.25;u.rate=.98;
+ u.onstart=()=>$('orb').classList.add('talk');u.onend=u.onerror=()=>$('orb').classList.remove('talk');speechSynthesis.speak(u)}
+function reply(t,m){add(t,'a');mood(m||detect(t));say(t)}
+
+/* কমান্ড */
+const APPS={youtube:'https://www.youtube.com',ইউটিউব:'https://www.youtube.com',facebook:'https://www.facebook.com',ফেসবুক:'https://www.facebook.com',whatsapp:'https://wa.me/',হোয়াটসঅ্যাপ:'https://wa.me/',instagram:'https://www.instagram.com',ইনস্টাগ্রাম:'https://www.instagram.com',tiktok:'https://www.tiktok.com',টিকটক:'https://www.tiktok.com',gmail:'https://mail.google.com',জিমেইল:'https://mail.google.com',maps:'https://maps.google.com',ম্যাপ:'https://maps.google.com',google:'https://www.google.com',গুগল:'https://www.google.com',github:'https://github.com'};
+function findContact(t){const lo=t.toLowerCase();for(const n in contacts)if(lo.includes(n.toLowerCase()))return[n,contacts[n]];
+ const m=t.match(/\+?\d[\d\s-]{6,}/);return m?[m[0].trim(),m[0].replace(/[\s-]/g,'')]:null}
+function go(url){location.href=url}
+
+function command(t){
+ const lo=t.toLowerCase();
+ let m=t.match(/(?:save|সেভ)\s+(.+?)\s+(\+?\d[\d\s-]{6,})/i);
+ if(m){contacts[m[1]]=m[2].replace(/[\s-]/g,'');S.set('contacts',contacts);reply(m[1]+' এর নম্বর সেভ করেছি।','happy');return true}
+ if(/(call|কল|ফোন)/.test(lo)){const c=findContact(t);
+  if(!c){reply('কাকে কল দেব? সেটিংসে কন্টাক্ট যোগ করো, অথবা বলো: সেভ আম্মু 017XXXXXXXX','think');return true}
+  reply(c[0]+' কে কল দিচ্ছি। ফোন কল অ্যাপ খুললে "কল" চাপো।','care');setTimeout(()=>go('tel:'+c[1]),1200);return true}
+ if(/(message|sms|মেসেজ|এসএমএস)/.test(lo)){const c=findContact(t);
+  if(!c){reply('কাকে মেসেজ পাঠাব? আগে কন্টাক্ট সেভ করো।','think');return true}
+  const body=(t.split(/[:：]|বলো|বলে|saying/i)[1]||'').trim();
+  reply(c[0]+' এর জন্য মেসেজ তৈরি করছি। পাঠানোর বোতাম তুমি চাপবে।','care');setTimeout(()=>go('sms:'+c[1]+(body?'?body='+encodeURIComponent(body):'')),1200);return true}
+ if(/(open|খোলো|খুলো|ওপেন|চালু কর)/.test(lo)){
+  for(const k in APPS)if(lo.includes(k)){reply(k+' খুলছি।','happy');setTimeout(()=>go(APPS[k]),900);return true}
+  reply('কোন অ্যাপ খুলব? যেমন: ইউটিউব, ফেসবুক, হোয়াটসঅ্যাপ, জিমেইল।','think');return true}
+ return false}
+
+/* উত্তর */
+async function ai(t){
+ hist.push({role:'user',content:t});mood('think');
+ try{
+  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+   body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:400,system:'তুমি LaaS, ব্যবহারকারীর আপন পার্সোনাল অ্যাসিস্ট্যান্ট। তুমি একজন উষ্ণ, মমতাময়ী মেয়ে। ব্যবহারকারী যে ভাষায় লেখে সেই ভাষায় ছোট ও আন্তরিক উত্তর দাও। অনুভূতি বুঝে সাড়া দাও।',messages:hist.slice(-12)})});
+  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||r.status);
+  const a=d.content.map(x=>x.text||'').join('');hist.push({role:'assistant',content:a});reply(a)
+ }catch(e){reply('এআই-এর সাথে যোগ হয়নি: '+e.message+'। সেটিংসে API key ঠিক আছে কি দেখো।','sad')}}
+function local(t){
+ if(/হ্যালো|হাই|hello|hi\b|সালাম/i.test(t))return reply('হ্যালো! আমি LaaS। বলো, কী করতে পারি?','happy');
+ if(/কেমন আছ|how are you/i.test(t))return reply('আমি ভালো আছি, তুমি কেমন আছ?','happy');
+ if(/সময়|time/i.test(t))return reply('এখন '+new Date().toLocaleTimeString('bn-BD'),'calm');
+ reply('আমি এখন কল, মেসেজ আর অ্যাপ খুলতে পারি। সাধারণ কথা বলার জন্য সেটিংসে API key দাও।','think')}
+
+function handle(t){t=t.trim();if(!t)return;add(t,'u');$('in').value='';mood(detect(t));
+ if(command(t))return;apiKey?ai(t):local(t)}
+
+/* ইনপুট */
+$('send').onclick=()=>handle($('in').value);
+$('in').onkeydown=e=>{if(e.key==='Enter')handle($('in').value)};
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec;
+$('mic').onclick=()=>{
+ if(!SR)return reply('এই ব্রাউজারে ভয়েস ইনপুট নেই। Chrome ব্যবহার করো।','think');
+ if(rec){rec.stop();return}
+ rec=new SR();rec.lang=lang;rec.interimResults=false;
+ rec.onstart=()=>$('mic').classList.add('on');
+ rec.onresult=e=>handle(e.results[0][0].transcript);
+ rec.onend=rec.onerror=()=>{$('mic').classList.remove('on');rec=null};rec.start()};
+$('lang').onclick=()=>{lang=lang==='bn-BD'?'en-US':'bn-BD';S.set('lang',lang);$('lang').textContent='ভাষা: '+(lang==='bn-BD'?'বাংলা':'English')};
+$('voice').onclick=()=>{voiceOn=!voiceOn;S.set('voice',voiceOn);$('voice').textContent='কণ্ঠ: '+(voiceOn?'চালু':'বন্ধ');if(!voiceOn)speechSynthesis.cancel()};
+$('lang').textContent='ভাষা: '+(lang==='bn-BD'?'বাংলা':'English');$('voice').textContent='কণ্ঠ: '+(voiceOn?'চালু':'বন্ধ');
+$('cfg').onclick=()=>{$('key').value=apiKey;$('cts').value=Object.entries(contacts).map(([n,v])=>n+'='+v).join('\n');$('dlg').showModal()};
+$('close').onclick=()=>$('dlg').close();
+$('save').onclick=()=>{apiKey=$('key').value.trim();S.set('key',apiKey);contacts={};
+ $('cts').value.split('\n').forEach(l=>{const[i,j]=l.split('=');if(i&&j)contacts[i.trim()]=j.trim().replace(/[\s-]/g,'')});
+ S.set('contacts',contacts);$('dlg').close();reply('সেটিংস সেভ হয়েছে।','happy')};
+
+speechSynthesis&&(speechSynthesis.onvoiceschanged=()=>{});
+add('হ্যালো, আমি LaaS। বলো বা লেখো: "আম্মুকে কল দাও", "ইউটিউব খোলো", "সেভ আম্মু 017XXXXXXXX"।','a');
+</script>
+</body>
+</html>
